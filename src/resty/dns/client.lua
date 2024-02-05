@@ -64,6 +64,7 @@ local clientErrors = {     -- client specific errors
   [100] = "cache only lookup failed",
   [101] = "empty record received",
 }
+local json = require("cjson").encode
 
 for _,v in ipairs(orderValids) do orderValids[v:upper()] = v end
 
@@ -638,6 +639,68 @@ end
 -- Parameter `answers` is updated in-place.
 -- @return `true`
 local function parseAnswer(qname, qtype, answers, try_list)
+  -- mock
+  if #qname>=13 and qname:sub(1,13) == "www.baidu.com" then
+    answers = {}
+    answers[1]={
+      name = "www.a.shifen.com",
+      address = "220.181.38.150",
+      type = _M.TYPE_A,
+      class = 1,
+      ttl = 10,
+    }
+    answers[2]={
+      name = "www.a.shifen.com",
+      address = "220.181.38.149",
+      type = _M.TYPE_A,
+      class = 1,
+      ttl = 10,
+    }
+    answers[3]={
+      name = "www.baidu.com",
+      cname = "www.a.shifen.com",
+      type = _M.TYPE_CNAME,
+      class = 1,
+      ttl = 10,
+    }
+    answers[4]={
+      name = "www.baidu.com.jck-namespace-50714.svc.cluster.local",
+      cname = "www.baidu.com",
+      type = _M.TYPE_CNAME,
+      class = 1,
+      ttl = 10,
+    }
+  elseif qname=="www.baidu.com" then
+    answers = {}
+    answers[1]={
+      name = "www.a.shifen.com",
+      address = "220.181.38.150",
+      type = _M.TYPE_A,
+      class = 1,
+      ttl = 10,
+    }
+    answers[2]={
+      name = "www.a.shifen.com",
+      address = "220.181.38.149",
+      type = _M.TYPE_A,
+      class = 1,
+      ttl = 10,
+    }
+    answers[3]={
+      name = "www.baidu.com",
+      cname = "www.a.shifen.com",
+      type = _M.TYPE_CNAME,
+      class = 1,
+      ttl = 10,
+    }
+    answers[4]={
+      name = "www.baidu.com.jck-namespace-50714.svc.cluster.local",
+      cname = "www.baidu.com",
+      type = _M.TYPE_CNAME,
+      class = 1,
+      ttl = 10,
+    }
+  end
 
   -- check the answers and store them in the cache
   -- eg. A, AAAA, SRV records may be accompanied by CNAME records
@@ -668,6 +731,7 @@ local function parseAnswer(qname, qtype, answers, try_list)
         others[key] = lst
       end
       table_insert(lst, 1, answer)  -- pos 1: preserve order
+      log(WARN,PREFIX,"remove"..json(answers[i]))
       table_remove(answers, i)
     end
   end
@@ -683,7 +747,7 @@ local function parseAnswer(qname, qtype, answers, try_list)
 
   -- now insert actual target record in cache
   cacheinsert(answers, qname, qtype)
-  return true
+  return answers
 end
 
 
@@ -728,18 +792,25 @@ local function executeQuery(premature, item)
     --]]
     try_status(item.try_list, "querying")
     item.result, item.err = r:query(item.qname, item.r_opts)
+
     if item.result then
       --[[
       log(DEBUG, PREFIX, "Query answer: ", item.qname, ":", item.r_opts.qtype, " ", fquery(item),
               " ", frecord(item.result))
       --]]
-      parseAnswer(item.qname, item.r_opts.qtype, item.result, item.try_list)
+      item.result =  parseAnswer(item.qname, item.r_opts.qtype, item.result, item.try_list)
+      log(WARN,PREFIX,"result_item2:".. json( item.result))
       --[[
       log(DEBUG, PREFIX, "Query parsed answer: ", item.qname, ":", item.r_opts.qtype, " ", fquery(item),
               " ", frecord(item.result))
     else
       log(DEBUG, PREFIX, "Query error: ", item.qname, ":", item.r_opts.qtype, " err=", tostring(err))
       --]]
+    else
+      -- for debug
+
+      item.result= parseAnswer(item.qname, item.r_opts.qtype, item.result, item.try_list)
+      log(WARN,PREFIX,"result_item:".. json( item.result))
     end
   end
 
@@ -909,10 +980,13 @@ local function lookup(qname, r_opts, dnsCacheOnly, try_list)
     -- perform a sync lookup, as we have no stale data to fall back to
     try_list = try_add(try_list, qname, r_opts.qtype, "cache-miss")
     if noSynchronisation then
+      log(WARN,PREFIX,"individualQuery")
       return individualQuery(qname, r_opts, try_list)
     end
+    log(WARN,PREFIX,"syncQuery")
     return syncQuery(qname, r_opts, try_list)
   end
+  log(WARN,PREFIX,"from cache")
 
   try_list = try_add(try_list, qname, r_opts.qtype, "cache-hit")
   if entry.expired then
@@ -1023,6 +1097,8 @@ end
 -- full `typeOrder` list
 -- @return in order all the fully qualified names + types to look up
 local function search_iter(qname, qtype)
+  -- mock ndots
+  config.ndots=5
   local _, dots = qname:gsub("%.", "")
 
   local type_list, type_start, type_end
@@ -1041,7 +1117,12 @@ local function search_iter(qname, qtype)
       -- this is a FQDN, so no searches
       search = {}
     else
-      search = config.search
+      -- mock search
+
+      search = {}
+      search[1] = "jck-namespace-50714.svc.cluster.local"
+      search[2] = "svc.cluster.local"
+      search[3] = "cluster.local"
     end
   end
   local i_search, search_start, search_end
@@ -1123,6 +1204,7 @@ end
 -- @param try_list (optional) list of tries to add to
 -- @return `list of records + nil + try_list`, or `nil + err + try_list`.
 local function resolve(qname, r_opts, dnsCacheOnly, try_list)
+  log(WARN, PREFIX, "resolve qname:" ..qname.."opts:"..json(r_opts).."try_list"..json(try_list))
   qname = string_lower(qname)
   local qtype = (r_opts or EMPTY).qtype
   local err, records
@@ -1141,6 +1223,11 @@ local function resolve(qname, r_opts, dnsCacheOnly, try_list)
   -- potentially requerying failed lookups in that process as the ttl for
   -- errors is relatively short (1 second default)
   records = cacheShortLookup(qname, qtype)
+  if qtype then
+    log(WARN,PREFIX,"from cache try_name:"..qname.."qtype:"..qtype.. "records:"..json(records))
+  else
+    log(WARN,PREFIX,"from cache try_name:"..qname.."qtype:".."nil ".. "records:"..json(records))
+  end
   if records then
     if try_list then
       -- check for recursion
@@ -1213,6 +1300,7 @@ local function resolve(qname, r_opts, dnsCacheOnly, try_list)
       -- go look it up
       opts.qtype = try_type
       records, err, try_list = lookup(try_name, opts, dnsCacheOnly, try_list)
+      log(WARN,PREFIX,"try_name:"..try_name.."opts:"..json(opts).. "records:"..json(records))
     end
 
     if not records then  -- luacheck: ignore
